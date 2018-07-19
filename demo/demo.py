@@ -3,28 +3,21 @@ import json
 import logging
 import time
 
-# logger = logging.getLogger('DEMO')
-# formatter = logging.Formatter('%(asctime)s %(levelname)-8s: %(message)s')
-# console_handler = logging.StreamHandler()
-# console_handler.formatter = formatter
-# logger.addHandler(console_handler)
-# logger.setLevel(logging.DEBUG)
-
 block = ''' 
-            hash : %s           
-            +%s+
-            | version :   %-90s |
-            | prehash :   %-90s |
-            | timestamp : %-90s |
-            | nonce :     %-90s |
-            | target:     %-90s |
-            | mercle:     %-90s |
-            +%s+
-            | trans :     %-90s |
-            +%s+ 
-                      |                    
-                      |
-                      V
+hash : %s           
++%s+
+  version :   %s 
+  prehash :   %s 
+  timestamp : %s 
+  nonce :     %s 
+  target:     %s 
+  mercle:     %s 
++%s+
+  trans :     %s 
++%s+ 
+          |                    
+          |
+          V
         '''
 
 def sha256(str):
@@ -39,24 +32,29 @@ def sha1(str):
 
 class Block:
 
-    def __init__(self, timestamp, transactions, preHash=''):
+    def __init__(self, timestamp, transactions, difficulty, preHash=''):
+        # body
+        self.transactions = transactions
+
+        # header
         self.version = '1.0'
         self.nonce = 0
         self.timestamp = timestamp
-        self.transactions = transactions
         self.merkleHash = self.merkleRootHash()
         self.preHash = preHash
+        self.difficulty = difficulty
+
         self.hash = self.headerHash()
 
     def headerHash(self):
-        return sha256(self.merkleHash + self.timestamp + self.preHash + str(self.nonce) + self.version)
+        return sha256(sha256(self.merkleHash + self.timestamp + self.preHash + str(self.nonce) + self.version + str(self.difficulty)))
 
     def merkleRootHash(self):
         return sha1(json.dumps(self.transactions))
 
     # PoW
-    def mineBlock(self, difficulty):
-        while self.hash[0:difficulty] != '0'*difficulty:
+    def mineBlock(self, target):
+        while self.hash[0:target] != '0'*target:
             self.nonce += 1
             self.hash = self.headerHash()
         # print("BLOCK MINED: " + self.hash)
@@ -66,12 +64,16 @@ class BlockChain:
 
     def __init__(self):
         self.chain = [self.createGenesisBlock()]
-        self.difficulty = 4
-        # 在区块产生之间存储交易的地方
+        # 比特币最低难度取值nBits=0x1d00ffff，对应的最大目标值为：0x00000000FFFF0000000000000000000000000000000000000000000000000000
+        # 这里简化计算
+        self.maxTarget = 10
+        self.difficulty = 2
+        # 存储交易
         self.pendingTransactions = []
 
-        # 挖矿回报
-        self.miningReward = 100
+        # 回报
+        self.miningReward = 2.33
+        self.totalfees = 0
 
     def createGenesisBlock(self):
         return Block('17/3/2018', 'Genesis block', '0')
@@ -86,21 +88,27 @@ class BlockChain:
     #     self.chain.append(newBlock)
 
     def createTransaction(self, transaction):
-        self.pendingTransactions.append(transaction)
+        self.pendingTransactions.append(transaction.getTran())
+        self.totalfees += transaction.getFees()
 
     def minePendingTransactions(self, miningRewardAddress):
-        # 用所有待交易来创建新的区块并且开挖..
-        block = Block(time.strftime('%Y/%m/%d',time.localtime(time.time())), self.pendingTransactions)
+        # 计算coinbase & 创建新的区块
+        coinbaseTX = Transaction('coinbase', miningRewardAddress, self.miningReward + self.totalfees, 0)
+        self.pendingTransactions.append(coinbaseTX.getTran())
+        block = Block(time.strftime('%Y/%m/%d',time.localtime(time.time())), self.pendingTransactions, self.difficulty)
         block.preHash = self.getLastBlock().hash
-        block.mineBlock(self.difficulty)
 
-        # 将新挖的看矿加入到链上
+        # 简化算法，挖矿传参为前导零个数，而非实际的区块难度目标值
+        block.mineBlock(int(self.maxTarget/self.difficulty))
+
+        # 上链
         self.chain.append(block)
 
-        # 重置待处理交易列表并且发送奖励
+        # 重置待处理交易列表
         self.pendingTransactions = [
-            Transaction(None, miningRewardAddress, self.miningReward).getTran()
+            Transaction(None, None, self.miningReward, 0).getTran()
         ]
+        self.totalfees = 0
 
     def getBalanceOfAddress(self, addr):
         balance = 0
@@ -126,40 +134,44 @@ class BlockChain:
 
     def outBC(self):
         for c in self.chain:
-            print(block % (c.hash, '-'*104, c.version ,c.preHash, c.timestamp, str(c.nonce),
-                           str(self.difficulty), c.merkleHash, '-'*104, json.dumps(c.transactions), '-'*104))
+            print(block % (c.hash, '-'*90, c.version ,c.preHash, c.timestamp, str(c.nonce),
+                           str(self.difficulty), c.merkleHash, '-'*90, json.dumps(c.transactions), '-'*90))
 
 class Transaction:
 
-    def __init__(self, fromAddr, toAddr, amount):
+    def __init__(self, fromAddr, toAddr, amount, fees):
         self.fromAddr = fromAddr
         self.toAddr = toAddr
         self.amount = amount
+        self.fees = fees
 
     def getTran(self):
         return {'from': self.fromAddr, 'to': self.toAddr, 'amount': self.amount}
 
+    def getFees(self):
+        return self.fees
+
 def test():
     # 创建lzm币
-    lzmCoin = BlockChain()
+    ttCoin = BlockChain()
 
     # 增加两笔交易
-    lzmCoin.createTransaction(Transaction('aaa', 'bbb', 100).getTran())
-    lzmCoin.createTransaction(Transaction('ddd', 'ccc', 51).getTran())
+    TA = Transaction('testA', 'testB', 99, 2)
+    ttCoin.createTransaction(TA)
+    TB = Transaction('testD', 'testC', 51, 1)
+    ttCoin.createTransaction(TB)
 
     # 挖矿
-    lzmCoin.minePendingTransactions('lzmaddr')
-    print(lzmCoin.getBalanceOfAddress('lzmaddr'))
-    lzmCoin.outBC()
+    starttime = time.time()
+    ttCoin.minePendingTransactions('miner')
+    endtime = time.time()
+    # print(ttCoin.getBalanceOfAddress('miner'))
+    ttCoin.outBC()
+    print(endtime - starttime)
 
-    # 奖励在下一个区块中
-    # lzmCoin.minePendingTransactions('lzmaddr')
-    # print(lzmCoin.getBalanceOfAddress('lzmaddr'))
-    # lzmCoin.outBC()
-
-    # print(lzmCoin.isChainValid())
-    # lzmCoin.chain[1].transactions = {'amount': 100}
-    # print(lzmCoin.isChainValid())
+    # print(ttCoin.isChainValid())
+    # ttCoin.chain[1].transactions = {'amount': 100}
+    # print(ttCoin.isChainValid())
 
 if __name__ == '__main__':
     test()
