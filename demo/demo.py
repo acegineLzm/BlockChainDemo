@@ -152,7 +152,7 @@ class Transaction:
         return self.fees
 
 def test():
-    # 创建lzm币
+    # 创建tt币
     ttCoin = BlockChain()
 
     # 增加两笔交易
